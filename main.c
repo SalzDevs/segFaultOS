@@ -6,7 +6,7 @@
 
 __attribute__((aligned(16))) uint8_t physical_ram[PAGE_SIZE * NUM_PAGES];
 
-uint64_t translate(uint64_t virtual_addr){
+uint64_t translate(uint64_t virtual_addr,int *page_table){
   int vpn = virtual_addr/PAGE_SIZE;
   int offset = virtual_addr%PAGE_SIZE;
 
