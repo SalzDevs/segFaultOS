@@ -11,8 +11,7 @@
 // MAXVA is actually one bit less than the max allowed by
 // Sv39, to avoid having to sign-extend virtual addresses
 // that have the high bit set.
-#define MAXVA (1L << (9 + 9 + 9 + 12 - 1)
-    )
+#define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
 // PX macro from xv6 - extracts 9-bit index for each page table level
 #define PXMASK         0x1FF // 9 bits mask (0b111111111)
 #define PXSHIFT(level) (PGSHIFT + (9 * (level)))
@@ -40,6 +39,26 @@ typedef uint64_t pte_t;
 
 // Page table type (pointer to array of PTEs)
 typedef uint64_t* pagetable_t;
+
+pagetable_t kernel_pagetable;
+
+// Simplified xv6-like memory layout constants
+#define UART0     0x10000000L
+#define VIRTIO0   0x10001000L
+#define PLIC      0x0c000000L
+#define KERNBASE  0x80000000L
+#define PHYSTOP   (KERNBASE + 128 * 1024 * 1024)
+#define TRAMPOLINE (MAXVA - PGSIZE)
+
+// Simulated satp register / TLB fence helpers
+static uint64_t simulated_satp;
+#define MAKE_SATP(pgtbl) ((uint64_t)(pgtbl))
+void sfence_vma(void) {
+  // no-op in this simulation
+}
+void w_satp(uint64_t val) {
+  simulated_satp = val;
+}
 
 // PTE flags
 #define PTE_V (1L << 0)  // Valid
@@ -125,8 +144,63 @@ int mappages(pagetable_t pagetable, uint64_t va, uint64_t size,uint64_t pa, int 
   return 0;
 }
 
+// add a mapping to the kernel page table.
+// only used when booting.
+// does not flush TLB or enable paging.
+void kvmmap(pagetable_t kpgtbl, uint64_t va, uint64_t pa, uint64_t sz, int perm) {
+  if (mappages(kpgtbl, va, sz, pa, perm) != 0)
+    panic("kvmmap");
+}
+
+// Make a direct-map page table for the kernel (xv6-style, simplified).
+pagetable_t kvmmake(void) {
+  pagetable_t kpgtbl = (pagetable_t)kalloc();
+  if (kpgtbl == 0)
+    panic("kvmmake: kalloc failed");
+
+  memset(kpgtbl, 0, PGSIZE);
+
+  // uart registers
+  kvmmap(kpgtbl, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+
+  // virtio mmio disk interface
+  kvmmap(kpgtbl, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+
+  // PLIC
+  kvmmap(kpgtbl, PLIC, PLIC, 0x4000000, PTE_R | PTE_W);
+
+  // map a small kernel text segment executable and read-only (simulation)
+  uint64_t etext = KERNBASE + 2 * PGSIZE;
+  kvmmap(kpgtbl, KERNBASE, KERNBASE, etext - KERNBASE, PTE_R | PTE_X);
+
+  // map kernel data / RAM region as read-write (simulation)
+  kvmmap(kpgtbl, etext, etext, PHYSTOP - etext, PTE_R | PTE_W);
+
+  // map trampoline
+  kvmmap(kpgtbl, TRAMPOLINE, TRAMPOLINE, PGSIZE, PTE_R | PTE_X);
+
+  return kpgtbl;
+}
+
+// initialize the kernel_pagetable, shared by all CPUs.
+void kvminit(void) {
+  kernel_pagetable = kvmmake();
+}
+
+// Switch the current CPU's h/w page table register to
+// the kernel's page table, and enable paging.
+void kvminithart(void) {
+  // wait for any previous writes to the page table memory to finish.
+  sfence_vma();
+
+  w_satp(MAKE_SATP(kernel_pagetable));
+
+  // flush stale entries from the TLB.
+  sfence_vma();
+}
+
 int main() {
-    printf("=== Testing xv6 walk() implementation ===\n\n");
+    printf(" Testing xv6 walk() implementation \n\n");
     
     // Allocate root page table (level 2)
     pagetable_t pagetable = (pagetable_t)kalloc();
@@ -139,13 +213,13 @@ int main() {
     // Test virtual address
     uint64_t vaddr = 0x1000;  // Simple virtual address
     
-    printf("\n=== Test 1: Lookup with alloc=0 (should fail) ===\n");
+    printf("\n Test 1: Lookup with alloc=0 (should fail) \n");
     pte_t *pte = walk(pagetable, vaddr, 0);
     if (pte == 0) {
         printf("Expected: walk returned 0 (page table not allocated)\n");
     }
     
-    printf("\n=== Test 2: Create mapping with alloc=1 ===\n");
+    printf("\n Test 2: Create mapping with alloc=1 \n");
     pte = walk(pagetable, vaddr, 1);
     if (pte) {
         printf("walk() returned PTE at %p\n", (void*)pte);
@@ -158,7 +232,7 @@ int main() {
         printf("PTE value: 0x%llx\n", *pte);
     }
     
-    printf("\n=== Test 3: Lookup with alloc=0 (should succeed now) ===\n");
+    printf("\n Test 3: Lookup with alloc=0 (should succeed now) \n");
     pte = walk(pagetable, vaddr, 0);
     if (pte) {
         printf("walk() found PTE at %p\n", (void*)pte);
@@ -174,6 +248,6 @@ int main() {
         printf("Read back: %llu\n", *(uint64_t*)pa);
     }
     
-    printf("\n=== Success! ===\n");
+    printf("\n Success! \n");
     return 0;
 }
