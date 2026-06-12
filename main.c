@@ -95,6 +95,32 @@ pte_t* walk(pagetable_t pagetable, uint64_t va, int alloc) {
     return &pagetable[PX(0, va)];
 }
 
+int mappages(pagetable_t pagetable, uint64_t va, uint64_t size,uint64_t pa, int perm){
+  uint64_t last,a;
+  pte_t* pte;
+
+  if((va%PAGE_SIZE)!=0) panic("mappages: va not aligned!");
+  if((size%PAGE_SIZE)!=0) panic("mappages: size not aligned!");
+  if(size==0) panic("mappages: size!");
+
+  a = va;
+  last = va + size -PAGE_SIZE;
+  for(;;){
+    if((pte = walk(pagetable,a,1))==0) return -1;
+    
+    if(*pte & PTE_V) panic("mappages: remap!");
+    
+    *pte = PA2PTE(pa)| perm | PTE_V;
+    
+    if(a==last) break;
+    
+    a += PGSIZE;
+    pa += PGSIZE;
+  }
+
+  return 0;
+}
+
 int main() {
     printf("=== Testing xv6 walk() implementation ===\n\n");
     
