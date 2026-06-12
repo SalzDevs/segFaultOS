@@ -7,8 +7,12 @@
 #define PGSIZE 4096
 #define NUM_PAGES 8
 #define PGSHIFT 12
-#define MAXVA (1L << 39)  // One beyond the highest possible virtual address
-
+// one beyond the highest possible virtual address.
+// MAXVA is actually one bit less than the max allowed by
+// Sv39, to avoid having to sign-extend virtual addresses
+// that have the high bit set.
+#define MAXVA (1L << (9 + 9 + 9 + 12 - 1)
+    )
 // PX macro from xv6 - extracts 9-bit index for each page table level
 #define PXMASK         0x1FF // 9 bits mask (0b111111111)
 #define PXSHIFT(level) (PGSHIFT + (9 * (level)))
